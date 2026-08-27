@@ -1,0 +1,14 @@
+{
+  "name": "photo-assembly",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server/index.js",
+    "start": "node server/index.js",
+    "test": "node --test",
+    "test:external": "node scripts/run-external-tests.mjs",
+    "check": "node --check server/index.js && node --check server/styles.js && node --check server/style-library.js && node --check server/image-service.js && node --check server/codex-jobs.js && node --check public/app.js && node --check scripts/run-external-tests.mjs"
+  },
+  "engines": { "node": ">=20" }
+}
