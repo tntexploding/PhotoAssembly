@@ -6,9 +6,10 @@ import { getStyle } from './styles.js';
 
 const jobsRoot = resolve(process.env.CODEX_JOBS_DIR || '.photoassembly/jobs');
 const extensions = new Set(['png', 'jpg', 'webp']);
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
 function jobDirectory(id) {
-  if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('无效的任务编号');
+  if (!UUID_PATTERN.test(id)) throw new Error('无效的任务编号');
   return join(jobsRoot, id);
 }
 
@@ -47,7 +48,8 @@ export async function getCodexJob(id) {
 export async function getCodexJobResult(id) {
   const job = await getCodexJob(id);
   if (!job.hasResult) throw new Error('任务尚未完成');
-  const extension = job.output.split('.').pop().toLowerCase();
+  const output = typeof job.output === 'string' && job.output.match(/^result\.(png|jpg|webp)$/i);
+  const extension = output?.[1]?.toLowerCase();
   if (!extensions.has(extension)) throw new Error('结果文件格式无效');
   return { buffer: await readFile(join(jobDirectory(id), job.output)), extension };
 }

@@ -77,8 +77,9 @@ export class SavedStyleLibrary {
     await this.load();
     if (!this.savedIds.has(id)) return false;
     this.savedIds.delete(id);
+    try { await this.#enqueueWrite(); }
+    catch (error) { this.savedIds.add(id); throw error; }
     removeImportedStyle(id);
-    await this.#enqueueWrite();
     return true;
   }
 

@@ -3,7 +3,7 @@ import { copyFile, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 
 const [, , id, sourceArg] = process.argv;
-if (!/^[a-f0-9-]{36}$/.test(id || '') || !sourceArg) {
+if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id || '') || !sourceArg) {
   console.error('Usage: complete-job.mjs <job-id> <final-image-path>'); process.exit(2);
 }
 const root = resolve(process.env.CODEX_JOBS_DIR || '.photoassembly/jobs');

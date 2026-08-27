@@ -19,6 +19,12 @@ export function parseImageDataUrl(value, maxBytes = 10 * 1024 * 1024) {
   if (!match || !TYPES.has(match[1])) throw new Error('仅支持 PNG、JPEG 或 WebP 图片');
   const buffer = Buffer.from(match[2], 'base64');
   if (!buffer.length || buffer.length > maxBytes) throw new Error(`图片必须小于 ${Math.round(maxBytes / 1048576)} MiB`);
+  const validSignature = match[1] === 'image/png'
+    ? buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    : match[1] === 'image/jpeg'
+      ? buffer[0] === 0xff && buffer[1] === 0xd8
+      : buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP';
+  if (!validSignature) throw new Error('图片内容与声明的格式不匹配');
   return { mime: match[1], ext: TYPES.get(match[1]), buffer };
 }
 

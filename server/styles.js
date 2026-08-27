@@ -109,9 +109,20 @@ export function normalizeStyleSource(value) {
   return url.href;
 }
 
-function isPrivateAddress(address) {
-  return /^(127\.|10\.|0\.|169\.254\.|192\.168\.|::1$|fc|fd|fe80)/i.test(address) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(address);
+export function isPrivateAddress(address) {
+  const normalized = String(address).toLowerCase();
+  if (normalized === '::' || normalized === '::1' || normalized.startsWith('::ffff:')) return true;
+  if (/^(fc|fd|fe[89ab]|ff)/.test(normalized)) return true;
+  const parts = normalized.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [first, second] = parts;
+  return first === 0 || first === 10 || first === 127 || first >= 224 ||
+    (first === 100 && second >= 64 && second <= 127) ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && (second === 0 || second === 168)) ||
+    (first === 198 && (second === 18 || second === 19 || second === 51)) ||
+    (first === 203 && second === 0);
 }
 
 export function parseStyleDocument(text, contentType = '') {

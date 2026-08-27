@@ -9,16 +9,38 @@ import { createCodexJob, getCodexJob, getCodexJobResult } from './codex-jobs.js'
 
 const root = join(fileURLToPath(new URL('..', import.meta.url)), 'public');
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const securityHeaders = {
+  'content-security-policy': "default-src 'self'; img-src 'self' data: https:; connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY'
+};
 const json = (res, status, data) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); };
 async function body(req) {
+  if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) {
+    const error = new Error('接口仅接受 application/json'); error.code = 'UNSUPPORTED_MEDIA_TYPE'; throw error;
+  }
   let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 15_000_000) throw new Error('请求过大'); }
   return JSON.parse(raw || '{}');
+}
+
+function validateOrigin(req) {
+  const value = req.headers.origin;
+  if (!value) return;
+  let origin; try { origin = new URL(value); } catch { origin = undefined; }
+  const loopback = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+  if (!origin || !loopback.has(origin.hostname.toLowerCase()) || origin.host.toLowerCase() !== String(req.headers.host || '').toLowerCase()) {
+    const error = new Error('拒绝非同源写入请求'); error.code = 'FORBIDDEN'; throw error;
+  }
 }
 
 export function createServer({ styleLibrary = savedStyleLibrary, styleImporter = importStylesFromUrl } = {}) {
   return http.createServer(async (req, res) => {
     try {
+      for (const [name, value] of Object.entries(securityHeaders)) res.setHeader(name, value);
       const url = new URL(req.url, 'http://localhost');
+      if (url.pathname.startsWith('/api/') && ['POST', 'PATCH', 'DELETE'].includes(req.method)) validateOrigin(req);
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, ai: Boolean(process.env.OPENAI_API_KEY) });
       if (url.pathname.startsWith('/api/')) await styleLibrary.load();
       if (req.method === 'GET' && url.pathname === '/api/styles') {
@@ -66,12 +88,15 @@ export function createServer({ styleLibrary = savedStyleLibrary, styleImporter =
       const file = await readFile(join(root, requested));
       res.writeHead(200, { 'content-type': types[extname(requested)] || 'application/octet-stream', 'cache-control': 'no-cache' }); res.end(file);
     } catch (error) {
-      const status = error.code === 'ENOENT' ? 404 : error instanceof SyntaxError ? 400 : 422;
+      const status = error.code === 'ENOENT' ? 404 : error.code === 'FORBIDDEN' ? 403 : error.code === 'UNSUPPORTED_MEDIA_TYPE' ? 415 : error instanceof SyntaxError ? 400 : 422;
       json(res, status, { error: status === 404 ? '页面不存在' : error.message });
     }
   });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  createServer().listen(Number(process.env.PORT) || 3000, () => console.log(`光绘已启动：http://localhost:${process.env.PORT || 3000}`));
+  const port = Number(process.env.PORT) || 3000;
+  const host = process.env.HOST || '127.0.0.1';
+  const displayHost = host.includes(':') ? `[${host}]` : host;
+  createServer().listen(port, host, () => console.log(`光绘已启动：http://${displayHost}:${port}`));
 }

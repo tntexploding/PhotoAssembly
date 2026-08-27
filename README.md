@@ -5,11 +5,13 @@
 ## 启动
 
 ```bash
-cp .env.example .env
 npm start
 ```
 
-打开 <http://localhost:3000>。Node.js 20+ 即可，无第三方运行时依赖。
+打开 <http://127.0.0.1:3000>。Node.js 20+ 即可，无第三方运行时依赖。服务默认仅监听本机回环地址；如确需局域网访问，
+可显式设置 `HOST=0.0.0.0`，并自行补充访问控制。
+
+`.env.example` 仅作为配置参考，当前版本不会自动加载 `.env` 文件；请在启动进程前通过 shell 设置所需环境变量。
 
 ## OpenAI 模式
 
@@ -58,5 +60,5 @@ npm run test:external # 显式联网验证示例 GitHub Skills
 ## 隐私与限制
 
 - 上传支持 PNG、JPEG 和 WebP，默认最大 10 MiB。
-- 图片仅在当前请求内存中处理，本应用不持久化原图。
+- 快速预览仅在当前请求中处理图片；创建 Codex 任务时，原图会写入被 Git 忽略的 `.photoassembly/jobs`，请在不再需要时手动删除。
 - 生产部署应在反向代理层补充鉴权、速率限制与 HTTPS。
