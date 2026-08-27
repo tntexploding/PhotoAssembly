@@ -4,21 +4,25 @@ import { lookup } from 'node:dns/promises';
 export const STYLES = Object.freeze({
   watercolor: {
     name: '清透水彩',
+    description: '半透明颜料、柔和边缘与克制粉彩，适合轻盈自然的照片。',
     prompt: 'Transform the photo into a delicate contemporary watercolor painting with translucent pigment washes, textured cold-press paper, soft edges and restrained pastel color. Preserve the subject, identity, composition and important details. No text or watermark.',
     filter: 'watercolor'
   },
   cinematic: {
     name: '电影夜色',
+    description: '青绿阴影、暖色高光和自然电影颗粒，营造克制的戏剧感。',
     prompt: 'Create a cinematic editorial photograph with teal shadows, warm highlights, subtle film grain, dramatic but natural lighting and premium color grading. Preserve the subject, identity and composition. No text or watermark.',
     filter: 'cinematic'
   },
   retro: {
     name: '复古胶片',
+    description: '暖色褪色、细腻颗粒和轻微光晕，呈现 1970 年代胶片质感。',
     prompt: 'Render as a nostalgic 1970s analog film photograph with warm faded color, fine grain, gentle halation and slightly lifted blacks. Preserve the subject, identity and composition. No text or watermark.',
     filter: 'retro'
   },
   ink: {
     name: '东方墨韵',
+    description: '黑墨、矿物色与宣纸呼吸感，保留主体的当代东方表达。',
     prompt: 'Transform into an elegant contemporary Chinese ink-wash artwork using expressive black ink, subtle mineral color accents, rice-paper texture and generous tonal breathing room. Preserve the recognizable subject and composition. No calligraphy, text, seal or watermark.',
     filter: 'ink'
   }
@@ -26,6 +30,48 @@ export const STYLES = Object.freeze({
 
 const importedStyles = new Map();
 const MAX_IMPORTED_PROMPT_CHARS = 60_000;
+const MAX_DESCRIPTION_CHARS = 240;
+const SAFETY_SUFFIX = ' Preserve the main subject and composition. No text or watermark.';
+
+function normalizeDescription(value, fallback) {
+  const candidate = typeof value === 'string' && !/^[>|-]$/.test(value.trim()) ? value : fallback;
+  const plain = String(candidate || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`~>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!plain) return '已保存的网络 Skill，可作为照片处理风格使用。';
+  return plain.length > MAX_DESCRIPTION_CHARS ? `${plain.slice(0, MAX_DESCRIPTION_CHARS - 1).trimEnd()}…` : plain;
+}
+
+function createImportedStyle({ name, prompt, description }) {
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 40) throw new Error('风格名称必须为 1–40 个字符');
+  const promptText = typeof prompt === 'string' ? prompt.trim() : '';
+  const allowedLength = promptText.endsWith(SAFETY_SUFFIX) ? MAX_IMPORTED_PROMPT_CHARS + SAFETY_SUFFIX.length : MAX_IMPORTED_PROMPT_CHARS;
+  if (promptText.length < 10 || promptText.length > allowedLength) throw new Error('风格提示词必须为 10–60000 个字符');
+  return {
+    name: name.trim(),
+    description: normalizeDescription(description, promptText),
+    prompt: promptText.endsWith(SAFETY_SUFFIX) ? promptText : `${promptText}${SAFETY_SUFFIX}`,
+    filter: 'watercolor',
+    imported: true
+  };
+}
+
+function importedStyleId(source) {
+  return `remote-${createHash('sha256').update(source).digest('hex').slice(0, 12)}`;
+}
+
+export function normalizeStyleSource(value) {
+  let url; try { url = new URL(value); } catch { throw new Error('请输入有效的 HTTPS 地址'); }
+  if (url.protocol !== 'https:' || url.username || url.password) throw new Error('仅允许无凭据的 HTTPS 地址');
+  const github = url.hostname.toLowerCase() === 'github.com' && url.pathname.match(/^\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
+  if (github) return `https://github.com/${github[1]}/${github[2]}`;
+  url.hash = '';
+  return url.href;
+}
 
 function isPrivateAddress(address) {
   return /^(127\.|10\.|0\.|169\.254\.|192\.168\.|::1$|fc|fd|fe80)/i.test(address) ||
@@ -34,30 +80,29 @@ function isPrivateAddress(address) {
 
 export function parseStyleDocument(text, contentType = '') {
   if (typeof text !== 'string' || !text.trim()) throw new Error('远程风格文件为空');
-  if (text.length > 64_000) throw new Error('远程风格文件不能超过 64KB');
-  let name; let prompt;
+  if (Buffer.byteLength(text, 'utf8') > 64_000) throw new Error('远程风格文件不能超过 64KB');
+  let name; let prompt; let description;
   if (contentType.includes('json') || text.trimStart().startsWith('{')) {
     let parsed; try { parsed = JSON.parse(text); } catch { throw new Error('远程 JSON 格式无效'); }
-    name = parsed.name || parsed.title; prompt = parsed.prompt || parsed.instructions;
+    name = parsed.name || parsed.title; prompt = parsed.prompt || parsed.instructions; description = parsed.description || parsed.summary;
   } else {
     const frontmatter = text.match(/^---\s*\n([\s\S]*?)\n---\s*/);
     const metadata = {};
     if (frontmatter) for (const line of frontmatter[1].split('\n')) {
       const field = line.match(/^([a-zA-Z][\w-]*):\s*["']?(.+?)["']?\s*$/);
-      if (field) metadata[field[1]] = field[2];
+      if (field) metadata[field[1].toLowerCase()] = field[2].replace(/^["']|["']$/g, '');
     }
     const body = frontmatter ? text.slice(frontmatter[0].length) : text;
     const heading = text.match(/^#\s+(.+)$/m);
     name = metadata.name || heading?.[1]?.trim() || '网络风格';
     prompt = body.replace(/^#\s+.+$/m, '').trim() || metadata.description;
+    description = metadata.description;
   }
-  if (typeof name !== 'string' || !name.trim() || name.length > 40) throw new Error('风格名称必须为 1–40 个字符');
-  if (typeof prompt !== 'string' || prompt.trim().length < 10 || prompt.length > MAX_IMPORTED_PROMPT_CHARS) throw new Error('风格提示词必须为 10–60000 个字符');
-  return { name: name.trim(), prompt: `${prompt.trim()} Preserve the main subject and composition. No text or watermark.`, filter: 'watercolor', imported: true };
+  return createImportedStyle({ name, prompt, description });
 }
 
 export function resolveStyleUrls(value) {
-  let url; try { url = new URL(value); } catch { throw new Error('请输入有效的 HTTPS 地址'); }
+  const url = new URL(normalizeStyleSource(value));
   const match = url.hostname === 'github.com' && url.pathname.match(/^\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
   if (!match) return [url.href];
   const [, owner, repository] = match;
@@ -80,31 +125,55 @@ async function safeFetch(url, redirects = 0) {
   if (!response.ok) throw new Error(`下载风格失败（HTTP ${response.status}）`);
   const length = Number(response.headers.get('content-length') || 0);
   if (length > 64_000) throw new Error('远程风格文件不能超过 64KB');
-  return { text: await response.text(), contentType: response.headers.get('content-type') || '' };
+  const text = await response.text();
+  if (Buffer.byteLength(text, 'utf8') > 64_000) throw new Error('远程风格文件不能超过 64KB');
+  return { text, contentType: response.headers.get('content-type') || '' };
 }
 
 export function registerImportedStyle(url, document) {
+  const source = normalizeStyleSource(url);
   const style = parseStyleDocument(document.text, document.contentType);
-  const id = `remote-${createHash('sha256').update(url).digest('hex').slice(0, 12)}`;
-  importedStyles.set(id, { ...style, source: url });
-  return { id, name: style.name, source: url, imported: true };
+  const id = importedStyleId(source);
+  importedStyles.set(id, { ...style, source });
+  return getStyleSummary(id);
+}
+
+export function restoreImportedStyle(record) {
+  const source = normalizeStyleSource(record?.source);
+  const id = importedStyleId(source);
+  if (record?.id && record.id !== id) throw new Error('本地 Skill 标识与来源不匹配');
+  const style = createImportedStyle(record || {});
+  importedStyles.set(id, { ...style, source, savedAt: record.savedAt });
+  return getStyleSummary(id);
 }
 
 export function removeImportedStyle(id) { importedStyles.delete(id); }
 
 export async function importStyleFromUrl(url) {
-  const candidates = resolveStyleUrls(url); let document; let lastError;
+  const source = normalizeStyleSource(url);
+  const candidates = resolveStyleUrls(source); let document; let lastError;
   for (const candidate of candidates) {
     try { document = await safeFetch(candidate); break; } catch (error) { lastError = error; }
   }
   if (!document) throw lastError;
-  return registerImportedStyle(url, document);
+  return registerImportedStyle(source, document);
 }
 
 export function getStyle(id) { return STYLES[id] || importedStyles.get(id); }
 
+export function getStyleSummary(id) {
+  const style = getStyle(id);
+  if (!style) return undefined;
+  return {
+    id,
+    name: style.name,
+    description: style.description,
+    imported: Boolean(style.imported),
+    ...(style.source ? { source: style.source } : {}),
+    ...(style.savedAt ? { savedAt: style.savedAt } : {})
+  };
+}
+
 export function listStyles() {
-  return [...Object.entries(STYLES), ...importedStyles.entries()].map(([id, style]) => ({
-    id, name: style.name, imported: Boolean(style.imported), ...(style.source ? { source: style.source } : {})
-  }));
+  return [...Object.keys(STYLES), ...importedStyles.keys()].map(getStyleSummary);
 }

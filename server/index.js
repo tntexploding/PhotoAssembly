@@ -2,7 +2,8 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { importStyleFromUrl, listStyles } from './styles.js';
+import { importStyleFromUrl, listStyles, removeImportedStyle } from './styles.js';
+import { savedStyleLibrary } from './style-library.js';
 import { stylize } from './image-service.js';
 import { createCodexJob, getCodexJob, getCodexJobResult } from './codex-jobs.js';
 
@@ -14,15 +15,26 @@ async function body(req) {
   return JSON.parse(raw || '{}');
 }
 
-export function createServer() {
+export function createServer({ styleLibrary = savedStyleLibrary } = {}) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true, ai: Boolean(process.env.OPENAI_API_KEY) });
-      if (req.method === 'GET' && url.pathname === '/api/styles') return json(res, 200, { styles: listStyles() });
+      if (url.pathname.startsWith('/api/')) await styleLibrary.load();
+      if (req.method === 'GET' && url.pathname === '/api/styles') {
+        const styles = listStyles().map(style => ({ ...style, saved: styleLibrary.has(style.id) }));
+        return json(res, 200, { styles });
+      }
       if (req.method === 'POST' && url.pathname === '/api/styles/import') {
         const input = await body(req);
-        return json(res, 201, { style: await importStyleFromUrl(input.url) });
+        const imported = await importStyleFromUrl(input.url);
+        try { return json(res, 201, { style: await styleLibrary.save(imported.id) }); }
+        catch (error) { removeImportedStyle(imported.id); throw error; }
+      }
+      const styleMatch = url.pathname.match(/^\/api\/styles\/(remote-[a-f0-9]{12})$/);
+      if (req.method === 'DELETE' && styleMatch) {
+        if (!await styleLibrary.remove(styleMatch[1])) return json(res, 404, { error: '未找到已保存的 Skill' });
+        return json(res, 200, { removed: true, id: styleMatch[1] });
       }
       if (req.method === 'POST' && url.pathname === '/api/stylize') {
         const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 120_000);

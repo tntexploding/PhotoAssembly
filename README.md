@@ -22,8 +22,13 @@ npm start
 展开界面中的“从网络导入 Skill / 提示词”，填写公开 HTTPS 地址即可导入 JSON、Markdown 或纯文本风格。
 JSON 格式可使用 `{ "name": "风格名", "prompt": "处理指令" }`；Markdown 的一级标题会成为风格名，其余正文成为提示词。
 GitHub 仓库首页地址会自动解析为仓库根目录的 `SKILL.md`，并依次尝试 `main` 与 `master` 分支；无需手工查找 Raw 地址。
-服务端限制文件为 64KB、阻止私有网络地址、限制重定向，并可用 `STYLE_IMPORT_HOSTS` 设置域名允许列表。远程内容
-只保存在进程内存中，重启后清除；请仅导入可信来源。
+服务端限制文件为 64KB、阻止私有网络地址、限制重定向，并可用 `STYLE_IMPORT_HOSTS` 设置域名允许列表。请仅导入可信来源。
+
+### 本地 Skill 库
+
+页面中的“Skill 网址保存栏”会在导入后显示 Skill 名称、简介与来源，并允许直接选择或移除。导入内容默认持久化到
+`.photoassembly/saved-skills.json`，因此服务重启后仍会自动恢复；该目录已被 Git 忽略。可通过 `SKILL_LIBRARY_FILE`
+指定其他存储文件。本地库最多保存 100 条记录；相同规范化网址会更新同一条记录，不会重复新增。
 
 仓库包含针对 `cinema-dna-21x9x3`、`reality-restaged` 和 `surreal-pop-collage` 的格式契约测试夹具，以及显式启用的
 GitHub 实时导入测试。常规 `npm test` 不依赖网络；`npm run test:external` 会从三个原始仓库下载 `SKILL.md`，为每个风格生成

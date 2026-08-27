@@ -2,24 +2,41 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from '../server/index.js';
-import { listStyles, parseStyleDocument, registerImportedStyle, removeImportedStyle, resolveStyleUrls } from '../server/styles.js';
+import { getStyle, listStyles, parseStyleDocument, registerImportedStyle, removeImportedStyle, resolveStyleUrls } from '../server/styles.js';
+import { SavedStyleLibrary } from '../server/style-library.js';
 import { parseImageDataUrl, stylize } from '../server/image-service.js';
 import { createCodexJob, getCodexJob } from '../server/codex-jobs.js';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 
 const onePixelPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XxG8WQAAAABJRU5ErkJggg==';
+
+async function createTestLibrary(t) {
+  const directory = await mkdtemp(join(tmpdir(), 'photoassembly-skills-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  return new SavedStyleLibrary(join(directory, 'saved-skills.json'));
+}
 
 test('hidden UI states cannot be overridden by component display rules', async () => {
   const css = await readFile(join('public', 'hidden-fix.css'), 'utf8');
   assert.match(css, /\[hidden\]\{display:none!important\}/);
 });
 
+test('skill library UI is labeled, keyboard-native and renders remote text safely', async () => {
+  const [html, app, css] = await Promise.all([
+    readFile(join('public', 'index.html'), 'utf8'),
+    readFile(join('public', 'app.js'), 'utf8'),
+    readFile(join('public', 'skill-library.css'), 'utf8')
+  ]);
+  assert.match(html, /id="skill-form"/); assert.match(html, /for="style-url"/); assert.match(html, /aria-live="polite"/);
+  assert.match(css, /:focus-visible/); assert.doesNotMatch(app, /\.innerHTML\s*=/);
+});
+
 test('style catalog exposes four curated styles', () => {
   assert.equal(listStyles().length, 4);
-  assert.deepEqual(listStyles()[0], { id: 'watercolor', name: '清透水彩', imported: false });
+  assert.deepEqual(listStyles()[0], { id: 'watercolor', name: '清透水彩', description: '半透明颜料、柔和边缘与克制粉彩，适合轻盈自然的照片。', imported: false });
 });
 
 test('image validation accepts PNG and rejects unsupported content', () => {
@@ -28,14 +45,28 @@ test('image validation accepts PNG and rejects unsupported content', () => {
 });
 
 test('remote style documents support JSON and Markdown with validation', () => {
-  const json = parseStyleDocument('{"name":"霓虹梦境","prompt":"Use vivid neon light while preserving the subject."}', 'application/json');
-  assert.equal(json.name, '霓虹梦境'); assert.match(json.prompt, /vivid neon/);
+  const json = parseStyleDocument('{"name":"霓虹梦境","description":"克制的城市霓虹摄影","prompt":"Use vivid neon light while preserving the subject."}', 'application/json');
+  assert.equal(json.name, '霓虹梦境'); assert.equal(json.description, '克制的城市霓虹摄影'); assert.match(json.prompt, /vivid neon/);
   const markdown = parseStyleDocument('# 铅笔速写\nUse expressive graphite hatching and paper texture.');
   assert.equal(markdown.name, '铅笔速写'); assert.match(markdown.prompt, /graphite/);
   assert.throws(() => parseStyleDocument('{}', 'application/json'), /风格名称/);
+  assert.throws(() => parseStyleDocument(`# 字节上限\n${'画'.repeat(22_000)}`), /64KB/);
   const longSkill = parseStyleDocument(`# 长篇风格\n${'Keep documentary detail and restrained composition. '.repeat(120)}`);
   assert.ok(longSkill.prompt.length > 4000);
   assert.match(longSkill.prompt, /documentary detail/);
+});
+
+test('saved Skill library persists descriptions and restores styles after restart', async (t) => {
+  const library = await createTestLibrary(t);
+  const source = 'https://example.com/editorial-style.md';
+  const style = registerImportedStyle(source, { text: '---\nname: editorial-light\ndescription: Restrained editorial lighting with natural texture.\n---\n# Editorial Light\nUse quiet directional light, natural skin texture and documentary detail.', contentType: 'text/markdown' });
+  t.after(() => removeImportedStyle(style.id));
+  const saved = await library.save(style.id); assert.equal(saved.saved, true); assert.match(saved.description, /Restrained editorial/);
+  const payload = JSON.parse(await readFile(library.filePath, 'utf8')); assert.equal(payload.styles.length, 1); assert.equal(payload.styles[0].source, source);
+  removeImportedStyle(style.id);
+  const restored = new SavedStyleLibrary(library.filePath); await restored.load();
+  assert.equal(restored.has(style.id), true); assert.match(getStyle(style.id).description, /Restrained editorial/);
+  assert.equal(await restored.remove(style.id), true); assert.equal(getStyle(style.id), undefined);
 });
 
 test('the three supplied GitHub skill formats produce named, detailed treatments', async () => {
@@ -81,7 +112,8 @@ test('Codex handoff creates a structured pending job without an API key', async 
 });
 
 test('HTTP API serves health, styles and rejects unknown styles', async (t) => {
-  const server = createServer().listen(0); await once(server, 'listening'); t.after(() => server.close());
+  const styleLibrary = await createTestLibrary(t);
+  const server = createServer({ styleLibrary }).listen(0); await once(server, 'listening'); t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   assert.equal((await (await fetch(`${base}/api/health`)).json()).ok, true);
   assert.equal((await (await fetch(`${base}/api/styles`)).json()).styles.length, 4);
@@ -90,4 +122,16 @@ test('HTTP API serves health, styles and rejects unknown styles', async (t) => {
   const created = await fetch(`${base}/api/codex/jobs`, { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ imageDataUrl: onePixelPng, styleId: 'ink' }) });
   assert.equal(created.status, 201); const codexJob = await created.json(); t.after(() => rm(join('.photoassembly/jobs', codexJob.id), { recursive: true, force: true }));
   assert.equal((await (await fetch(`${base}/api/codex/jobs/${codexJob.id}`)).json()).status, 'pending');
+});
+
+test('HTTP API lists and removes a locally saved Skill', async (t) => {
+  const styleLibrary = await createTestLibrary(t);
+  const style = registerImportedStyle('https://example.com/saved-style.md', { text: '# Saved Style\nUse restrained color, natural texture and a documentary composition.', contentType: 'text/markdown' });
+  t.after(() => removeImportedStyle(style.id)); await styleLibrary.save(style.id);
+  const server = createServer({ styleLibrary }).listen(0); await once(server, 'listening'); t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const listed = await (await fetch(`${base}/api/styles`)).json();
+  assert.equal(listed.styles.find(item => item.id === style.id).saved, true);
+  const removed = await fetch(`${base}/api/styles/${style.id}`, { method: 'DELETE' }); assert.equal(removed.status, 200);
+  const after = await (await fetch(`${base}/api/styles`)).json(); assert.equal(after.styles.some(item => item.id === style.id), false);
 });
