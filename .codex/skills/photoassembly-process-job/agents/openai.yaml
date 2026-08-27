@@ -1,0 +1,4 @@
+interface:
+  display_name: "PhotoAssembly 图片处理"
+  short_description: "使用 Codex 图像能力处理 PhotoAssembly 待办任务"
+  default_prompt: "Use $photoassembly-process-job to process the next pending PhotoAssembly image job."
