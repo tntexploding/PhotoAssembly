@@ -52,14 +52,25 @@ export class SavedStyleLibrary {
   }
 
   async save(id) {
+    return (await this.saveMany([id]))[0];
+  }
+
+  async saveMany(ids) {
     await this.load();
-    const style = getStyle(id);
-    if (!style?.imported || !style.source) throw new Error('只能保存已导入的网络 Skill');
-    if (!this.savedIds.has(id) && this.savedIds.size >= MAX_SAVED_STYLES) throw new Error(`本地 Skill 库最多保存 ${MAX_SAVED_STYLES} 条记录`);
-    style.savedAt = style.savedAt || new Date().toISOString();
-    this.savedIds.add(id);
-    await this.#enqueueWrite();
-    return { ...getStyleSummary(id), saved: true, savedAt: style.savedAt };
+    const uniqueIds = [...new Set(ids)];
+    if (!uniqueIds.length) throw new Error('没有可保存的 Skill');
+    const styles = uniqueIds.map(id => getStyle(id));
+    if (styles.some(style => !style?.imported || !style.source)) throw new Error('只能保存已导入的网络 Skill');
+    const newIds = uniqueIds.filter(id => !this.savedIds.has(id));
+    if (this.savedIds.size + newIds.length > MAX_SAVED_STYLES) throw new Error(`本地 Skill 库最多保存 ${MAX_SAVED_STYLES} 条记录`);
+    const savedAt = new Date().toISOString();
+    for (const [index, id] of uniqueIds.entries()) {
+      styles[index].savedAt = styles[index].savedAt || savedAt;
+      this.savedIds.add(id);
+    }
+    try { await this.#enqueueWrite(); }
+    catch (error) { for (const id of newIds) this.savedIds.delete(id); throw error; }
+    return uniqueIds.map(id => ({ ...getStyleSummary(id), saved: true, savedAt: getStyle(id).savedAt }));
   }
 
   async remove(id) {

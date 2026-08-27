@@ -21,8 +21,10 @@ npm start
 
 展开界面中的“从网络导入 Skill / 提示词”，填写公开 HTTPS 地址即可导入 JSON、Markdown 或纯文本风格。
 JSON 格式可使用 `{ "name": "风格名", "prompt": "处理指令" }`；Markdown 的一级标题会成为风格名，其余正文成为提示词。
-GitHub 仓库首页地址会自动解析为仓库根目录的 `SKILL.md`，并依次尝试 `main` 与 `master` 分支；无需手工查找 Raw 地址。
+GitHub 仓库首页地址会先尝试根目录的 `SKILL.md`；若根目录没有该文件，会读取默认分支并自动发现仓库内最多 20 个
+`SKILL.md`，一次加入本地库。也可以直接粘贴 GitHub `tree` 文件夹、`blob` 文件或 Raw 地址，无需手工改写 URL。
 服务端限制文件为 64KB、阻止私有网络地址、限制重定向，并可用 `STYLE_IMPORT_HOSTS` 设置域名允许列表。请仅导入可信来源。
+若启用了域名允许列表，GitHub 仓库自动发现需要同时允许 `raw.githubusercontent.com` 与 `api.github.com`。
 
 ### 本地 Skill 库
 

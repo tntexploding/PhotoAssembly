@@ -31,7 +31,7 @@ test('skill library UI is labeled, keyboard-native and renders remote text safel
     readFile(join('public', 'skill-library.css'), 'utf8')
   ]);
   assert.match(html, /id="skill-form"/); assert.match(html, /for="style-url"/); assert.match(html, /aria-live="polite"/);
-  assert.match(css, /:focus-visible/); assert.doesNotMatch(app, /\.innerHTML\s*=/);
+  assert.match(css, /:focus-visible/); assert.match(app, /payload\.styles/); assert.doesNotMatch(app, /\.innerHTML\s*=/);
 });
 
 test('style catalog exposes four curated styles', () => {
@@ -91,6 +91,9 @@ test('the three supplied GitHub skill formats produce named, detailed treatments
     'https://raw.githubusercontent.com/traveler0621/reality-restaged/main/SKILL.md',
     'https://raw.githubusercontent.com/traveler0621/reality-restaged/master/SKILL.md'
   ]);
+  const nestedRaw = 'https://raw.githubusercontent.com/Zeejay0/gathered-scenes-zine-skill/main/skills/scenes-gathered-zine-v1-3/SKILL.md';
+  assert.deepEqual(resolveStyleUrls('https://github.com/Zeejay0/gathered-scenes-zine-skill/tree/main/skills/scenes-gathered-zine-v1-3'), [nestedRaw]);
+  assert.deepEqual(resolveStyleUrls('https://github.com/Zeejay0/gathered-scenes-zine-skill/blob/main/skills/scenes-gathered-zine-v1-3/SKILL.md'), [nestedRaw]);
 });
 
 test('demo engine returns a self-contained styled image', async () => {
@@ -134,4 +137,32 @@ test('HTTP API lists and removes a locally saved Skill', async (t) => {
   assert.equal(listed.styles.find(item => item.id === style.id).saved, true);
   const removed = await fetch(`${base}/api/styles/${style.id}`, { method: 'DELETE' }); assert.equal(removed.status, 200);
   const after = await (await fetch(`${base}/api/styles`)).json(); assert.equal(after.styles.some(item => item.id === style.id), false);
+});
+
+test('HTTP API saves every Skill discovered in one GitHub repository', async (t) => {
+  const styleLibrary = await createTestLibrary(t);
+  const imported = [];
+  const styleImporter = async () => {
+    const definitions = [
+      ['scenes-gathered-zine-v1-3', 'Preserve truthful photography inside a spacious paper collage.'],
+      ['scene-distillation-zine-v1-3', 'Distill the supplied scene into an original editorial illustration.']
+    ];
+    for (const [name, prompt] of definitions) {
+      imported.push(registerImportedStyle(`https://github.com/example/zine/blob/main/skills/${name}/SKILL.md`, {
+        text: `---\nname: ${name}\ndescription: ${prompt}\n---\n# ${name}\n${prompt}`,
+        contentType: 'text/markdown'
+      }));
+    }
+    return imported;
+  };
+  t.after(() => imported.forEach(style => removeImportedStyle(style.id)));
+  const server = createServer({ styleLibrary, styleImporter }).listen(0); await once(server, 'listening'); t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const response = await fetch(`${base}/api/styles/import`, {
+    method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ url: 'https://github.com/example/zine' })
+  });
+  assert.equal(response.status, 201);
+  const payload = await response.json(); assert.equal(payload.styles.length, 2); assert.equal(payload.style.id, payload.styles[0].id);
+  const saved = (await (await fetch(`${base}/api/styles`)).json()).styles.filter(style => style.saved);
+  assert.equal(saved.length, 2); assert.deepEqual(saved.map(style => style.name), ['scenes-gathered-zine-v1-3', 'scene-distillation-zine-v1-3']);
 });

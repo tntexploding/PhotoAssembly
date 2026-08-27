@@ -31,6 +31,8 @@ export const STYLES = Object.freeze({
 const importedStyles = new Map();
 const MAX_IMPORTED_PROMPT_CHARS = 60_000;
 const MAX_DESCRIPTION_CHARS = 240;
+const MAX_DISCOVERED_SKILLS = 20;
+const MAX_GITHUB_INDEX_BYTES = 1_000_000;
 const SAFETY_SUFFIX = ' Preserve the main subject and composition. No text or watermark.';
 
 function normalizeDescription(value, fallback) {
@@ -64,11 +66,33 @@ function importedStyleId(source) {
   return `remote-${createHash('sha256').update(source).digest('hex').slice(0, 12)}`;
 }
 
+function githubLocation(url) {
+  if (url.hostname.toLowerCase() !== 'github.com') return undefined;
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts.length < 2) return undefined;
+  const repository = parts[1].replace(/\.git$/i, '');
+  if (!parts[0] || !repository) return undefined;
+  return {
+    owner: parts[0],
+    repository,
+    action: parts[2]?.toLowerCase(),
+    ref: parts[3],
+    path: parts.slice(4).join('/')
+  };
+}
+
 export function normalizeStyleSource(value) {
   let url; try { url = new URL(value); } catch { throw new Error('请输入有效的 HTTPS 地址'); }
   if (url.protocol !== 'https:' || url.username || url.password) throw new Error('仅允许无凭据的 HTTPS 地址');
-  const github = url.hostname.toLowerCase() === 'github.com' && url.pathname.match(/^\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-  if (github) return `https://github.com/${github[1]}/${github[2]}`;
+  const github = githubLocation(url);
+  if (github && !github.action) return `https://github.com/${github.owner}/${github.repository}`;
+  if (github?.action === 'blob' && github.ref && github.path) {
+    return `https://github.com/${github.owner}/${github.repository}/blob/${github.ref}/${github.path}`;
+  }
+  if (github?.action === 'tree' && github.ref && github.path) {
+    const path = /(^|\/)SKILL\.md$/i.test(github.path) ? github.path : `${github.path.replace(/\/$/, '')}/SKILL.md`;
+    return `https://github.com/${github.owner}/${github.repository}/blob/${github.ref}/${path}`;
+  }
   url.hash = '';
   return url.href;
 }
@@ -103,16 +127,23 @@ export function parseStyleDocument(text, contentType = '') {
 
 export function resolveStyleUrls(value) {
   const url = new URL(normalizeStyleSource(value));
-  const match = url.hostname === 'github.com' && url.pathname.match(/^\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-  if (!match) return [url.href];
-  const [, owner, repository] = match;
+  const github = githubLocation(url);
+  if (!github) return [url.href];
+  if (github.action === 'blob' && github.ref && github.path) {
+    return [`https://raw.githubusercontent.com/${github.owner}/${github.repository}/${github.ref}/${github.path}`];
+  }
+  if (github.action) return [url.href];
   return [
-    `https://raw.githubusercontent.com/${owner}/${repository}/main/SKILL.md`,
-    `https://raw.githubusercontent.com/${owner}/${repository}/master/SKILL.md`
+    `https://raw.githubusercontent.com/${github.owner}/${github.repository}/main/SKILL.md`,
+    `https://raw.githubusercontent.com/${github.owner}/${github.repository}/master/SKILL.md`
   ];
 }
 
-async function safeFetch(url, redirects = 0) {
+function responseSizeError(maxBytes) {
+  return maxBytes === 64_000 ? new Error('远程风格文件不能超过 64KB') : new Error('GitHub 仓库索引过大，无法自动发现 Skill');
+}
+
+async function safeFetch(url, { redirects = 0, maxBytes = 64_000, accept = 'application/json, text/markdown, text/plain' } = {}) {
   if (redirects > 3) throw new Error('远程地址重定向次数过多');
   let target; try { target = new URL(url); } catch { throw new Error('请输入有效的 HTTPS 地址'); }
   if (target.protocol !== 'https:' || target.username || target.password) throw new Error('仅允许无凭据的 HTTPS 地址');
@@ -120,21 +151,49 @@ async function safeFetch(url, redirects = 0) {
   if (allowed.length && !allowed.includes(target.hostname)) throw new Error('该域名不在 STYLE_IMPORT_HOSTS 允许列表中');
   const addresses = await lookup(target.hostname, { all: true });
   if (!addresses.length || addresses.some(item => isPrivateAddress(item.address))) throw new Error('不允许访问本地或私有网络地址');
-  const response = await fetch(target, { redirect: 'manual', signal: AbortSignal.timeout(8000), headers: { accept: 'application/json, text/markdown, text/plain' } });
-  if ([301, 302, 303, 307, 308].includes(response.status)) return safeFetch(new URL(response.headers.get('location'), target).href, redirects + 1);
-  if (!response.ok) throw new Error(`下载风格失败（HTTP ${response.status}）`);
+  const response = await fetch(target, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { accept, 'user-agent': 'PhotoAssembly/1.0' } });
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    return safeFetch(new URL(response.headers.get('location'), target).href, { redirects: redirects + 1, maxBytes, accept });
+  }
+  if (!response.ok) {
+    const error = new Error(`下载风格失败（HTTP ${response.status}）`); error.status = response.status; throw error;
+  }
   const length = Number(response.headers.get('content-length') || 0);
-  if (length > 64_000) throw new Error('远程风格文件不能超过 64KB');
+  if (length > maxBytes) throw responseSizeError(maxBytes);
   const text = await response.text();
-  if (Buffer.byteLength(text, 'utf8') > 64_000) throw new Error('远程风格文件不能超过 64KB');
+  if (Buffer.byteLength(text, 'utf8') > maxBytes) throw responseSizeError(maxBytes);
   return { text, contentType: response.headers.get('content-type') || '' };
+}
+
+async function discoverGithubSkillSources(source) {
+  const github = githubLocation(new URL(source));
+  if (!github || github.action) return [];
+  const apiBase = `https://api.github.com/repos/${github.owner}/${github.repository}`;
+  const metadataDocument = await safeFetch(apiBase, { maxBytes: 256_000, accept: 'application/vnd.github+json' });
+  let metadata; try { metadata = JSON.parse(metadataDocument.text); } catch { throw new Error('GitHub 仓库信息格式无效'); }
+  if (typeof metadata.default_branch !== 'string' || !metadata.default_branch) throw new Error('无法确定 GitHub 仓库默认分支');
+  const treeDocument = await safeFetch(`${apiBase}/git/trees/${encodeURIComponent(metadata.default_branch)}?recursive=1`, {
+    maxBytes: MAX_GITHUB_INDEX_BYTES,
+    accept: 'application/vnd.github+json'
+  });
+  let tree; try { tree = JSON.parse(treeDocument.text); } catch { throw new Error('GitHub 仓库索引格式无效'); }
+  if (tree.truncated) throw new Error('GitHub 仓库文件过多，请粘贴具体 Skill 文件夹或 SKILL.md 地址');
+  const paths = Array.isArray(tree.tree) ? tree.tree
+    .filter(item => item?.type === 'blob' && /(^|\/)SKILL\.md$/i.test(item.path || ''))
+    .map(item => item.path) : [];
+  if (!paths.length) throw new Error('该 GitHub 仓库中未找到 SKILL.md');
+  const rootSkill = paths.find(path => path.toLowerCase() === 'skill.md');
+  const selected = rootSkill ? [rootSkill] : paths;
+  if (selected.length > MAX_DISCOVERED_SKILLS) throw new Error(`一次最多自动导入 ${MAX_DISCOVERED_SKILLS} 个 Skill，请粘贴具体文件夹地址`);
+  return selected.map(path => `https://github.com/${github.owner}/${github.repository}/blob/${metadata.default_branch}/${path}`);
 }
 
 export function registerImportedStyle(url, document) {
   const source = normalizeStyleSource(url);
   const style = parseStyleDocument(document.text, document.contentType);
   const id = importedStyleId(source);
-  importedStyles.set(id, { ...style, source });
+  const savedAt = importedStyles.get(id)?.savedAt;
+  importedStyles.set(id, { ...style, source, ...(savedAt ? { savedAt } : {}) });
   return getStyleSummary(id);
 }
 
@@ -149,14 +208,24 @@ export function restoreImportedStyle(record) {
 
 export function removeImportedStyle(id) { importedStyles.delete(id); }
 
-export async function importStyleFromUrl(url) {
+export async function importStylesFromUrl(url) {
   const source = normalizeStyleSource(url);
   const candidates = resolveStyleUrls(source); let document; let lastError;
   for (const candidate of candidates) {
     try { document = await safeFetch(candidate); break; } catch (error) { lastError = error; }
   }
-  if (!document) throw lastError;
-  return registerImportedStyle(source, document);
+  if (document) return [registerImportedStyle(source, document)];
+  const discoveredSources = await discoverGithubSkillSources(source);
+  if (!discoveredSources.length) throw lastError;
+  const documents = await Promise.all(discoveredSources.map(async discoveredSource => {
+    const [candidate] = resolveStyleUrls(discoveredSource);
+    return { source: discoveredSource, document: await safeFetch(candidate) };
+  }));
+  return documents.map(item => registerImportedStyle(item.source, item.document));
+}
+
+export async function importStyleFromUrl(url) {
+  return (await importStylesFromUrl(url))[0];
 }
 
 export function getStyle(id) { return STYLES[id] || importedStyles.get(id); }

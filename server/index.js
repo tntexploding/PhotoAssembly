@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { importStyleFromUrl, listStyles, removeImportedStyle } from './styles.js';
+import { importStylesFromUrl, listStyles, removeImportedStyle } from './styles.js';
 import { savedStyleLibrary } from './style-library.js';
 import { stylize } from './image-service.js';
 import { createCodexJob, getCodexJob, getCodexJobResult } from './codex-jobs.js';
@@ -15,7 +15,7 @@ async function body(req) {
   return JSON.parse(raw || '{}');
 }
 
-export function createServer({ styleLibrary = savedStyleLibrary } = {}) {
+export function createServer({ styleLibrary = savedStyleLibrary, styleImporter = importStylesFromUrl } = {}) {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
@@ -27,9 +27,15 @@ export function createServer({ styleLibrary = savedStyleLibrary } = {}) {
       }
       if (req.method === 'POST' && url.pathname === '/api/styles/import') {
         const input = await body(req);
-        const imported = await importStyleFromUrl(input.url);
-        try { return json(res, 201, { style: await styleLibrary.save(imported.id) }); }
-        catch (error) { removeImportedStyle(imported.id); throw error; }
+        const imported = await styleImporter(input.url);
+        const previouslySaved = new Set(imported.filter(style => styleLibrary.has(style.id)).map(style => style.id));
+        try {
+          const styles = await styleLibrary.saveMany(imported.map(style => style.id));
+          return json(res, 201, { style: styles[0], styles });
+        } catch (error) {
+          for (const style of imported) if (!previouslySaved.has(style.id)) removeImportedStyle(style.id);
+          throw error;
+        }
       }
       const styleMatch = url.pathname.match(/^\/api\/styles\/(remote-[a-f0-9]{12})$/);
       if (req.method === 'DELETE' && styleMatch) {

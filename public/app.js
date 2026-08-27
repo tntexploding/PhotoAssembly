@@ -81,8 +81,11 @@ $('#skill-form').addEventListener('submit', async event => {
   try {
     const response = await fetch('/api/styles/import', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ url }) });
     const payload = await response.json(); if (!response.ok) throw new Error(payload.error || '导入失败');
-    const style = payload.style; state.savedStyles.set(style.id, style); renderSavedSkills(); input.value = '';
+    const styles = Array.isArray(payload.styles) && payload.styles.length ? payload.styles : [payload.style];
+    for (const style of styles) state.savedStyles.set(style.id, style);
+    const style = styles[0]; renderSavedSkills(); input.value = '';
     const select = savedSkills.querySelector(`[data-style="${style.id}"]`); selectStyle(select); select?.focus(); setImportStatus(`已保存并应用「${style.name}」`, 'success');
+    if (styles.length > 1) setImportStatus(`已保存 ${styles.length} 个 Skill，并应用「${style.name}」`, 'success');
   } catch (reason) { setImportStatus(reason.message, 'error'); }
   finally { button.disabled = false; input.removeAttribute('aria-busy'); }
 });
