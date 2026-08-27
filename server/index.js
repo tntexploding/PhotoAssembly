@@ -38,6 +38,12 @@ export function createServer({ styleLibrary = savedStyleLibrary, styleImporter =
         }
       }
       const styleMatch = url.pathname.match(/^\/api\/styles\/(remote-[a-f0-9]{12})$/);
+      if (req.method === 'PATCH' && styleMatch) {
+        const input = await body(req);
+        const style = await styleLibrary.updateAlias(styleMatch[1], input.alias);
+        if (!style) return json(res, 404, { error: '未找到已保存的 Skill' });
+        return json(res, 200, { style });
+      }
       if (req.method === 'DELETE' && styleMatch) {
         if (!await styleLibrary.remove(styleMatch[1])) return json(res, 404, { error: '未找到已保存的 Skill' });
         return json(res, 200, { removed: true, id: styleMatch[1] });

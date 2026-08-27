@@ -31,7 +31,8 @@ test('skill library UI is labeled, keyboard-native and renders remote text safel
     readFile(join('public', 'skill-library.css'), 'utf8')
   ]);
   assert.match(html, /id="skill-form"/); assert.match(html, /for="style-url"/); assert.match(html, /aria-live="polite"/);
-  assert.match(css, /:focus-visible/); assert.match(app, /payload\.styles/); assert.doesNotMatch(app, /\.innerHTML\s*=/);
+  assert.match(css, /:focus-visible/); assert.match(css, /saved-skill-alias-form/); assert.match(app, /dataset\.editAlias/); assert.match(app, /method:'PATCH'/);
+  assert.match(app, /payload\.styles/); assert.doesNotMatch(app, /\.innerHTML\s*=/);
 });
 
 test('style catalog exposes four curated styles', () => {
@@ -62,10 +63,13 @@ test('saved Skill library persists descriptions and restores styles after restar
   const style = registerImportedStyle(source, { text: '---\nname: editorial-light\ndescription: Restrained editorial lighting with natural texture.\n---\n# Editorial Light\nUse quiet directional light, natural skin texture and documentary detail.', contentType: 'text/markdown' });
   t.after(() => removeImportedStyle(style.id));
   const saved = await library.save(style.id); assert.equal(saved.saved, true); assert.match(saved.description, /Restrained editorial/);
-  const payload = JSON.parse(await readFile(library.filePath, 'utf8')); assert.equal(payload.styles.length, 1); assert.equal(payload.styles[0].source, source);
+  const aliased = await library.updateAlias(style.id, '纪实柔光'); assert.equal(aliased.alias, '纪实柔光');
+  await assert.rejects(library.updateAlias(style.id, '别'.repeat(41)), /不能超过 40/);
+  const payload = JSON.parse(await readFile(library.filePath, 'utf8')); assert.equal(payload.styles.length, 1); assert.equal(payload.styles[0].source, source); assert.equal(payload.styles[0].alias, '纪实柔光');
   removeImportedStyle(style.id);
   const restored = new SavedStyleLibrary(library.filePath); await restored.load();
-  assert.equal(restored.has(style.id), true); assert.match(getStyle(style.id).description, /Restrained editorial/);
+  assert.equal(restored.has(style.id), true); assert.match(getStyle(style.id).description, /Restrained editorial/); assert.equal(getStyle(style.id).alias, '纪实柔光');
+  assert.equal((await restored.updateAlias(style.id, '')).alias, undefined);
   assert.equal(await restored.remove(style.id), true); assert.equal(getStyle(style.id), undefined);
 });
 
@@ -135,6 +139,9 @@ test('HTTP API lists and removes a locally saved Skill', async (t) => {
   const base = `http://127.0.0.1:${server.address().port}`;
   const listed = await (await fetch(`${base}/api/styles`)).json();
   assert.equal(listed.styles.find(item => item.id === style.id).saved, true);
+  const patched = await fetch(`${base}/api/styles/${style.id}`, { method: 'PATCH', headers: {'content-type':'application/json'}, body: JSON.stringify({ alias: '安静纪实色' }) });
+  assert.equal(patched.status, 200); assert.equal((await patched.json()).style.alias, '安静纪实色');
+  const afterAlias = await (await fetch(`${base}/api/styles`)).json(); assert.equal(afterAlias.styles.find(item => item.id === style.id).alias, '安静纪实色');
   const removed = await fetch(`${base}/api/styles/${style.id}`, { method: 'DELETE' }); assert.equal(removed.status, 200);
   const after = await (await fetch(`${base}/api/styles`)).json(); assert.equal(after.styles.some(item => item.id === style.id), false);
 });

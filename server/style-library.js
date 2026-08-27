@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { getStyle, getStyleSummary, removeImportedStyle, restoreImportedStyle } from './styles.js';
+import { getStyle, getStyleSummary, removeImportedStyle, restoreImportedStyle, setImportedStyleAlias } from './styles.js';
 
 const SCHEMA_VERSION = 1;
 const MAX_SAVED_STYLES = 100;
@@ -82,6 +82,17 @@ export class SavedStyleLibrary {
     return true;
   }
 
+  async updateAlias(id, value) {
+    await this.load();
+    if (!this.savedIds.has(id)) return undefined;
+    const previousAlias = getStyle(id)?.alias;
+    const updated = setImportedStyleAlias(id, value);
+    if (!updated) return undefined;
+    try { await this.#enqueueWrite(); }
+    catch (error) { setImportedStyleAlias(id, previousAlias); throw error; }
+    return { ...getStyleSummary(id), saved: true };
+  }
+
   #enqueueWrite() {
     const next = this.writeQueue.then(() => this.#writeSnapshot());
     this.writeQueue = next.catch(() => {});
@@ -95,6 +106,7 @@ export class SavedStyleLibrary {
       return {
         id,
         name: style.name,
+        ...(style.alias ? { alias: style.alias } : {}),
         description: style.description,
         prompt: style.prompt,
         source: style.source,

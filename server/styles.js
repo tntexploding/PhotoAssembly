@@ -35,6 +35,16 @@ const MAX_DISCOVERED_SKILLS = 20;
 const MAX_GITHUB_INDEX_BYTES = 1_000_000;
 const SAFETY_SUFFIX = ' Preserve the main subject and composition. No text or watermark.';
 
+function normalizeAlias(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') throw new Error('Skill 别名必须为字符串');
+  const alias = value.trim();
+  if (!alias) return undefined;
+  if (alias.length > 40) throw new Error('Skill 别名不能超过 40 个字符');
+  if (/[\u0000-\u001f\u007f]/.test(alias)) throw new Error('Skill 别名不能包含控制字符');
+  return alias;
+}
+
 function normalizeDescription(value, fallback) {
   const candidate = typeof value === 'string' && !/^[>|-]$/.test(value.trim()) ? value : fallback;
   const plain = String(candidate || '')
@@ -48,17 +58,19 @@ function normalizeDescription(value, fallback) {
   return plain.length > MAX_DESCRIPTION_CHARS ? `${plain.slice(0, MAX_DESCRIPTION_CHARS - 1).trimEnd()}…` : plain;
 }
 
-function createImportedStyle({ name, prompt, description }) {
+function createImportedStyle({ name, prompt, description, alias }) {
   if (typeof name !== 'string' || !name.trim() || name.trim().length > 40) throw new Error('风格名称必须为 1–40 个字符');
   const promptText = typeof prompt === 'string' ? prompt.trim() : '';
   const allowedLength = promptText.endsWith(SAFETY_SUFFIX) ? MAX_IMPORTED_PROMPT_CHARS + SAFETY_SUFFIX.length : MAX_IMPORTED_PROMPT_CHARS;
   if (promptText.length < 10 || promptText.length > allowedLength) throw new Error('风格提示词必须为 10–60000 个字符');
+  const normalizedAlias = normalizeAlias(alias);
   return {
     name: name.trim(),
     description: normalizeDescription(description, promptText),
     prompt: promptText.endsWith(SAFETY_SUFFIX) ? promptText : `${promptText}${SAFETY_SUFFIX}`,
     filter: 'watercolor',
-    imported: true
+    imported: true,
+    ...(normalizedAlias ? { alias: normalizedAlias } : {})
   };
 }
 
@@ -192,8 +204,13 @@ export function registerImportedStyle(url, document) {
   const source = normalizeStyleSource(url);
   const style = parseStyleDocument(document.text, document.contentType);
   const id = importedStyleId(source);
-  const savedAt = importedStyles.get(id)?.savedAt;
-  importedStyles.set(id, { ...style, source, ...(savedAt ? { savedAt } : {}) });
+  const previous = importedStyles.get(id);
+  importedStyles.set(id, {
+    ...style,
+    source,
+    ...(previous?.alias ? { alias: previous.alias } : {}),
+    ...(previous?.savedAt ? { savedAt: previous.savedAt } : {})
+  });
   return getStyleSummary(id);
 }
 
@@ -207,6 +224,15 @@ export function restoreImportedStyle(record) {
 }
 
 export function removeImportedStyle(id) { importedStyles.delete(id); }
+
+export function setImportedStyleAlias(id, value) {
+  const style = importedStyles.get(id);
+  if (!style) return undefined;
+  const alias = normalizeAlias(value);
+  if (alias) style.alias = alias;
+  else delete style.alias;
+  return getStyleSummary(id);
+}
 
 export async function importStylesFromUrl(url) {
   const source = normalizeStyleSource(url);
@@ -236,6 +262,7 @@ export function getStyleSummary(id) {
   return {
     id,
     name: style.name,
+    ...(style.alias ? { alias: style.alias } : {}),
     description: style.description,
     imported: Boolean(style.imported),
     ...(style.source ? { source: style.source } : {}),
