@@ -1,0 +1,41 @@
+{
+  "host": "127.0.0.1",
+  "port": 3000,
+  "dataDir": ".photoassembly",
+  "limits": {
+    "maxImageBytes": 10485760,
+    "maxImagePixels": 50000000,
+    "maxImageDimension": 16384,
+    "maxRequestBytes": 15073280
+  },
+  "paths": {
+    "skillLibraryFile": ".photoassembly/saved-skills.json",
+    "jobsDir": ".photoassembly/jobs",
+    "backupsDir": ".photoassembly/backups",
+    "logFile": ".photoassembly/logs/app.log"
+  },
+  "openai": {
+    "model": "gpt-image-2",
+    "size": "auto",
+    "quality": "medium",
+    "outputFormat": "png",
+    "inputFidelity": "high",
+    "timeoutMs": 120000,
+    "maxRetries": 2,
+    "promptMaxChars": 32000
+  },
+  "styleImport": {
+    "allowedHosts": [
+      "raw.githubusercontent.com",
+      "api.github.com"
+    ],
+    "timeoutMs": 15000,
+    "cacheTtlMs": 300000
+  },
+  "jobs": {
+    "retentionDays": 0,
+    "maxResultBytes": 26214400
+  },
+  "logLevel": "info",
+  "importedSkillsAllowText": true
+}

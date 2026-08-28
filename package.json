@@ -6,9 +6,14 @@
   "scripts": {
     "dev": "node --watch server/index.js",
     "start": "node server/index.js",
+    "doctor": "node scripts/local-admin.mjs doctor",
+    "jobs": "node scripts/local-admin.mjs jobs",
+    "cleanup": "node scripts/local-admin.mjs cleanup",
+    "backup": "node scripts/local-admin.mjs backup",
+    "backup:images": "node scripts/local-admin.mjs backup --include-images",
     "test": "node --test",
     "test:external": "node scripts/run-external-tests.mjs",
-    "check": "node --check server/index.js && node --check server/styles.js && node --check server/style-library.js && node --check server/image-service.js && node --check server/codex-jobs.js && node --check public/app.js && node --check scripts/run-external-tests.mjs"
+    "check": "node --check server/config.js && node --check server/index.js && node --check server/styles.js && node --check server/style-library.js && node --check server/image-service.js && node --check server/codex-jobs.js && node --check server/local-backup.js && node --check server/logger.js && node --check public/api.js && node --check public/app.js && node --check public/skill-library.js && node --check public/job-library.js && node --check scripts/local-admin.mjs && node --check scripts/run-external-tests.mjs && node --check .codex/skills/photoassembly-process-job/scripts/complete-job.mjs"
   },
   "engines": { "node": ">=20" }
 }

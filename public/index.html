@@ -1,48 +1,111 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="光绘：用 AI 将日常照片转化为独特艺术作品">
-  <title>光绘 · AI 照片风格实验室</title><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/hidden-fix.css"><link rel="stylesheet" href="/skill-library.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="光绘：在本机使用 Codex 或 OpenAI 将照片转化为艺术作品">
+  <title>光绘 · 本地照片风格实验室</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/hidden-fix.css">
+  <link rel="stylesheet" href="/skill-library.css">
 </head>
 <body>
-  <header><a class="brand" href="#"><span class="mark">光</span><span>光绘<small>PHOTO ASSEMBLY</small></span></a><span id="engine" class="engine">检测引擎…</span></header>
-  <main>
-    <section class="intro"><p class="eyebrow">AI VISUAL ATELIER</p><h1>让每一张照片，<br><em>抵达另一种想象。</em></h1><p class="lede">保留记忆的本来面貌，再赋予它全新的艺术语言。</p></section>
-    <section class="studio">
+  <header class="site-header">
+    <a class="brand" href="#main"><span class="mark" aria-hidden="true">光</span><span>光绘<small>PHOTO ASSEMBLY</small></span></a>
+    <span id="engine" class="engine" role="status">检测本地引擎…</span>
+  </header>
+
+  <main id="main">
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">LOCAL VISUAL ATELIER</p>
+      <h1 id="page-title">让每一张照片，<br><em>抵达另一种想象。</em></h1>
+      <p class="lede">照片、Skill 与任务默认由这台电脑上的本地服务管理；启用 OpenAI 快速预览时，当前照片会发送给 OpenAI 处理。</p>
+    </section>
+
+    <section class="studio" aria-label="照片风格化工作台">
       <div class="controls">
         <div class="step"><b>01</b><span>选择照片</span></div>
-        <label class="drop" id="drop"><input id="file" type="file" accept="image/png,image/jpeg,image/webp"><span class="plus">＋</span><strong>拖放照片到这里</strong><small>或点击浏览 · PNG / JPG / WEBP · 最大 10MB</small></label>
+        <label class="drop" id="drop" for="file">
+          <input class="visually-hidden" id="file" type="file" accept="image/png,image/jpeg,image/webp">
+          <span class="plus" aria-hidden="true">＋</span><strong>拖放照片到这里</strong>
+          <small id="file-limit">或按 Enter 浏览 · PNG / JPG / WEBP</small>
+        </label>
+
         <div class="step"><b>02</b><span>挑选一种气质</span></div>
-        <div class="styles" id="styles">
-          <button class="style active" data-style="watercolor" aria-pressed="true"><i class="swatch water"></i><span><strong>清透水彩</strong><small>轻盈 · 柔和 · 纸张肌理</small></span></button>
-          <button class="style" data-style="cinematic" aria-pressed="false"><i class="swatch cinema"></i><span><strong>电影夜色</strong><small>戏剧光影 · 高级色调</small></span></button>
-          <button class="style" data-style="retro" aria-pressed="false"><i class="swatch film"></i><span><strong>复古胶片</strong><small>暖调 · 颗粒 · 怀旧</small></span></button>
-          <button class="style" data-style="ink" aria-pressed="false"><i class="swatch ink"></i><span><strong>东方墨韵</strong><small>留白 · 墨色 · 当代东方</small></span></button>
+        <div class="styles" id="styles" aria-label="内置风格">
+          <button class="style active" type="button" data-style="watercolor" data-imported="false" aria-pressed="true"><i class="swatch water" aria-hidden="true"></i><span><strong>清透水彩</strong><small>轻盈 · 柔和 · 纸张肌理</small></span></button>
+          <button class="style" type="button" data-style="cinematic" data-imported="false" aria-pressed="false"><i class="swatch cinema" aria-hidden="true"></i><span><strong>电影夜色</strong><small>戏剧光影 · 高级色调</small></span></button>
+          <button class="style" type="button" data-style="retro" data-imported="false" aria-pressed="false"><i class="swatch film" aria-hidden="true"></i><span><strong>复古胶片</strong><small>暖调 · 颗粒 · 怀旧</small></span></button>
+          <button class="style" type="button" data-style="ink" data-imported="false" aria-pressed="false"><i class="swatch ink" aria-hidden="true"></i><span><strong>东方墨韵</strong><small>留白 · 墨色 · 当代东方</small></span></button>
         </div>
+
         <section class="skill-library" aria-labelledby="skill-library-title">
-          <div class="skill-library-head"><div><small>LOCAL SKILL LIBRARY</small><h2 id="skill-library-title">Skill 网址保存栏</h2></div><output id="skill-count" aria-live="polite">0 个已保存</output></div>
-          <p class="skill-library-note">粘贴 GitHub 仓库或公开 HTTPS Skill 地址。内容会安全解析并保存到本机。</p>
+          <div class="section-head">
+            <div><small>LOCAL SKILL LIBRARY</small><h2 id="skill-library-title">Skill 网址保存栏</h2></div>
+            <output id="skill-count" aria-live="polite">0 个已保存</output>
+          </div>
+          <p class="section-note">默认仅允许 GitHub Raw 与 API 域名。其他 HTTPS 来源可在本地配置中显式加入。</p>
           <form id="skill-form" class="skill-form">
             <label for="style-url">Skill 网址</label>
             <div><input id="style-url" type="url" inputmode="url" autocomplete="url" spellcheck="false" required placeholder="https://github.com/owner/skill"><button id="import-style" type="submit">保存并应用</button></div>
             <p id="import-status" role="status" aria-live="polite"></p>
           </form>
+          <div class="library-tools" aria-label="Skill 备份工具">
+            <button id="export-skills" type="button" class="text-button">导出 Skill</button>
+            <label class="text-button" for="skill-backup-file">导入 Skill 备份</label>
+            <input class="visually-hidden" id="skill-backup-file" type="file" accept="application/json,.json">
+          </div>
           <div id="saved-skills" class="saved-skills" aria-live="polite" aria-busy="true"><p class="skill-library-state">正在读取本地 Skill…</p></div>
         </section>
-        <label class="prompt"><span>补充你的想法 <small>可选</small></span><textarea id="prompt" maxlength="400" placeholder="例如：更明亮一些，保留人物表情…"></textarea></label>
-        <button id="create" class="create" disabled><span>本地 / API 快速预览</span><b>→</b></button>
-        <button id="codex-create" class="codex-create" disabled><span>生成 Codex 处理方案</span><b>✦</b></button><p id="error" role="alert"></p>
-        <section id="codex-job" class="codex-job" hidden><small>CODEX HANDOFF</small><strong>处理方案已就绪</strong><p id="job-id"></p><textarea id="codex-task" readonly aria-label="Codex 任务提示"></textarea><div><button id="copy-task">复制任务提示</button><button id="check-job">检查处理结果</button></div><span id="job-status" role="status">等待人工使用 Codex 处理</span></section>
+
+        <label class="prompt" for="prompt"><span>补充你的想法 <small>可选，最多 400 字</small></span><textarea id="prompt" maxlength="400" placeholder="例如：更明亮一些，保留人物表情…"></textarea></label>
+        <p id="preview-note" class="action-note">内置风格可使用本地滤镜预览；网络 Skill 需要 OpenAI 或 Codex。</p>
+        <button id="create" class="create" type="button" disabled><span>本地 / OpenAI 快速预览</span><b aria-hidden="true">→</b></button>
+        <button id="codex-create" class="codex-create" type="button" disabled><span>生成 Codex 处理方案</span><b aria-hidden="true">✦</b></button>
+        <p id="error" role="alert"></p>
+
+        <section id="codex-job" class="codex-job" aria-labelledby="current-job-title" hidden>
+          <small>CODEX HANDOFF</small><h2 id="current-job-title">本地处理任务</h2><p id="job-id"></p>
+          <textarea id="codex-task" readonly aria-label="Codex 任务提示"></textarea>
+          <div><button id="copy-task" type="button">复制任务提示</button><button id="check-job" type="button">检查处理结果</button></div>
+          <span id="job-status" role="status">等待人工使用 Codex 处理</span>
+        </section>
+
+        <section class="job-library" aria-labelledby="job-library-title">
+          <div class="section-head"><div><small>LOCAL JOB STORAGE</small><h2 id="job-library-title">本地任务</h2></div><output id="job-count" aria-live="polite">读取中…</output></div>
+          <div class="job-tools">
+            <button id="clear-completed" type="button" class="text-button">清理已完成</button>
+            <label><input id="backup-images" type="checkbox">备份包含原图和结果</label>
+            <button id="backup-local" type="button" class="text-button">创建本地备份</button>
+          </div>
+          <p id="job-library-status" role="status" aria-live="polite"></p>
+          <div id="job-list" class="job-list" aria-busy="true"></div>
+        </section>
       </div>
+
       <div class="canvas" id="canvas">
-        <div class="empty" id="empty"><div class="orbit"><span>✦</span></div><strong>你的画布正在等待</strong><p>上传一张照片，开始一场视觉漫游</p><button id="sample">试试示例照片</button></div>
-        <div class="preview" id="preview" hidden><img id="result" alt="风格化效果"><div class="before" id="before"><img id="original" alt="原始照片"></div><input id="compare" type="range" min="0" max="100" value="50" aria-label="比较原图和效果图"><span class="tag left">原图</span><span class="tag right">效果</span><div class="loading" id="loading" hidden><span></span><strong>正在重绘光影…</strong><small>AI 正在理解你的照片</small></div></div>
-        <div class="actions" id="actions" hidden><button id="reset">重新选择</button><a id="download" download="光绘作品.png">下载作品 ↓</a></div>
-        <span class="index">ATELIER / 001</span>
+        <div class="empty" id="empty"><div class="orbit" aria-hidden="true"><span>✦</span></div><strong>你的画布正在等待</strong><p>上传一张照片，开始一场视觉漫游</p><button id="sample" type="button">试试示例照片</button></div>
+        <div class="preview" id="preview" hidden>
+          <img id="result" alt="风格化效果">
+          <div class="before" id="before"><img id="original" alt="原始照片"></div>
+          <input id="compare" type="range" min="0" max="100" value="50" aria-label="比较原图和效果图">
+          <span class="tag left">原图</span><span class="tag right">效果</span>
+          <div class="loading" id="loading" role="status" hidden><span aria-hidden="true"></span><strong>正在重绘光影…</strong><small>请保持本地服务运行</small></div>
+        </div>
+        <div class="actions" id="actions" hidden><button id="reset" type="button">重新选择</button><a id="download" download="光绘作品.png">下载作品 ↓</a></div>
+        <span class="index" aria-hidden="true">ATELIER / 001</span>
       </div>
     </section>
+
+    <details class="local-config">
+      <summary>本机配置与数据说明</summary>
+      <dl><div><dt>数据目录</dt><dd id="data-directory">读取中…</dd></div><div><dt>图片限制</dt><dd id="config-image-limit">读取中…</dd></div><div><dt>远程 Skill 主机</dt><dd id="config-hosts">读取中…</dd></div></dl>
+      <p>非秘密设置来自 <code>config.local.json</code>；密钥只从系统环境变量、<code>.env</code> 或 <code>.env.local</code> 读取。本地备份永远排除这些密钥文件。配置 OpenAI 后，点击快速预览会把当前照片和处理方向发送给 OpenAI。</p>
+    </details>
   </main>
-  <footer><span>把日常，重新想象。</span><span>PRIVACY FIRST · YOUR PHOTO IS NOT STORED</span></footer>
+
+  <footer><span>把日常，重新想象。</span><span>照片会在创建 Codex 任务时保存到本机数据目录，可在“本地任务”中永久删除。</span><span>AI 结果可能存在偏差，请在使用前人工检查。</span></footer>
   <script type="module" src="/app.js"></script>
-</body></html>
+</body>
+</html>
