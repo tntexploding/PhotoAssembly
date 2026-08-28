@@ -1,12 +1,13 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { config } from './config.js';
 import { getStyle, getStyleSummary, removeImportedStyle, restoreImportedStyle, setImportedStyleAlias } from './styles.js';
 
 const SCHEMA_VERSION = 1;
 const MAX_SAVED_STYLES = 100;
 
 function defaultLibraryPath() {
-  return resolve(process.env.SKILL_LIBRARY_FILE || '.photoassembly/saved-skills.json');
+  return config.paths.skillLibraryFile;
 }
 
 export class SavedStyleLibrary {
@@ -16,6 +17,8 @@ export class SavedStyleLibrary {
     this.loaded = false;
     this.loading = null;
     this.writeQueue = Promise.resolve();
+    this.warnings = [];
+    this.recoveredFromBackup = false;
   }
 
   has(id) {
@@ -39,16 +42,58 @@ export class SavedStyleLibrary {
     try { raw = await readFile(this.filePath, 'utf8'); }
     catch (error) { if (error.code === 'ENOENT') return; throw error; }
     let payload;
-    try { payload = JSON.parse(raw); } catch { throw new Error('本地 Skill 库文件不是有效的 JSON'); }
+    try { payload = JSON.parse(raw); }
+    catch (error) {
+      try {
+        payload = JSON.parse(await readFile(`${this.filePath}.bak`, 'utf8'));
+        this.recoveredFromBackup = true;
+        this.warnings.push('主 Skill 库文件损坏，已从上一次备份恢复；下次保存会重建主文件。');
+      } catch { throw new Error('本地 Skill 库文件不是有效的 JSON，且没有可用备份'); }
+    }
     if (payload?.schemaVersion !== SCHEMA_VERSION || !Array.isArray(payload.styles)) throw new Error('本地 Skill 库格式无效');
     for (const record of payload.styles) {
       try {
         const style = restoreImportedStyle(record);
         this.savedIds.add(style.id);
-      } catch {
-        // 跳过单条损坏记录，避免整个 Skill 库不可用。
+      } catch (error) {
+        this.warnings.push(`已跳过一条损坏的 Skill 记录：${error.message}`);
       }
     }
+  }
+
+  getWarnings() {
+    return [...this.warnings];
+  }
+
+  async exportSnapshot() {
+    await this.load();
+    return this.#snapshot();
+  }
+
+  async importSnapshot(payload, { replace = false } = {}) {
+    await this.load();
+    if (payload?.schemaVersion !== SCHEMA_VERSION || !Array.isArray(payload.styles)) throw new Error('Skill 备份格式无效');
+    if (payload.styles.length > MAX_SAVED_STYLES) throw new Error(`Skill 备份不能超过 ${MAX_SAVED_STYLES} 条记录`);
+    const previousIds = new Set(this.savedIds);
+    const previousSnapshot = this.#snapshot();
+    const importedIds = [];
+    try {
+      if (replace) this.savedIds.clear();
+      for (const record of payload.styles) {
+        const style = restoreImportedStyle(record);
+        this.savedIds.add(style.id);
+        importedIds.push(style.id);
+      }
+      if (this.savedIds.size > MAX_SAVED_STYLES) throw new Error(`本地 Skill 库最多保存 ${MAX_SAVED_STYLES} 条记录`);
+      await this.#enqueueWrite();
+      if (replace) for (const id of previousIds) if (!this.savedIds.has(id)) removeImportedStyle(id);
+    } catch (error) {
+      for (const id of importedIds) if (!previousIds.has(id)) removeImportedStyle(id);
+      for (const record of previousSnapshot.styles) restoreImportedStyle(record);
+      this.savedIds = previousIds;
+      throw error;
+    }
+    return { imported: importedIds.length, total: this.savedIds.size };
   }
 
   async save(id) {
@@ -101,6 +146,24 @@ export class SavedStyleLibrary {
   }
 
   async #writeSnapshot() {
+    const payload = this.#snapshot();
+    const temporary = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    await mkdir(dirname(this.filePath), { recursive: true });
+    if (!this.recoveredFromBackup) {
+      try { await copyFile(this.filePath, `${this.filePath}.bak`); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    try {
+      await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      await rename(temporary, this.filePath);
+      this.recoveredFromBackup = false;
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+  }
+
+  #snapshot() {
     const styles = [...this.savedIds].map(id => {
       const style = getStyle(id);
       if (!style) return undefined;
@@ -111,13 +174,11 @@ export class SavedStyleLibrary {
         description: style.description,
         prompt: style.prompt,
         source: style.source,
-        savedAt: style.savedAt
+        savedAt: style.savedAt,
+        allowText: Boolean(style.allowText)
       };
     }).filter(Boolean);
-    const temporary = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(temporary, `${JSON.stringify({ schemaVersion: SCHEMA_VERSION, styles }, null, 2)}\n`, 'utf8');
-    await rename(temporary, this.filePath);
+    return { schemaVersion: SCHEMA_VERSION, exportedAt: new Date().toISOString(), styles };
   }
 }
 
